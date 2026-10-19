@@ -9,7 +9,7 @@ export type WeightClass = "light" | "medium" | "heavy" | "fixture";
 export type SwingStyle = "club" | "thrust" | "smash" | "shield" | "throwOnly" | "flail" | "none";
 
 export type PropShapePart =
-  | { kind: "box"; c: V3; half: V3; rotY?: number }
+  | { kind: "box"; c: V3; half: V3; rotY?: number; rot?: readonly [number, number, number, number] }
   | { kind: "capsule"; a: V3; b: V3; r: number }
   | { kind: "cylinder"; a: V3; b: V3; r: number }
   | { kind: "sphere"; c: V3; r: number };

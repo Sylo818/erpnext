@@ -90,6 +90,14 @@ const _tmpC = new Vector3();
 const _tmpD = new Vector3();
 const _qa = Quaternion.Identity();
 
+export interface SeveredBody {
+  index: number;
+  pos: Vector3;
+  q: Quaternion;
+  lin: Vector3;
+  ang: Vector3;
+}
+
 export class Rig {
   readonly scene: Scene;
   readonly spec: RigSpec;
@@ -131,60 +139,92 @@ export class Rig {
       const node = new TransformNode(`${opts.name}.${bs.name}`, opts.scene);
       node.rotationQuaternion = Quaternion.Identity();
       node.position.set(bs.restCenter[0], bs.restCenter[1], bs.restCenter[2]);
-      const body = new PhysicsBody(node, PhysicsMotionType.DYNAMIC, false, opts.scene);
-      const shape = this.makeShape(bs);
-      shape.filterMembershipMask = membership;
-      shape.filterCollideMask = collide;
-      shape.material = { friction: bs.name.startsWith("foot") ? 0.9 : 0.6, restitution: 0.02 };
-      body.shape = shape;
-      body.setMassProperties({
-        mass: bs.mass,
-        centerOfMass: Vector3.Zero(),
-        inertia: new Vector3(bs.inertia[0], bs.inertia[1], bs.inertia[2]),
-        inertiaOrientation: Quaternion.Identity(),
-      });
-      body.setLinearDamping(0.05);
-      body.setAngularDamping(bs.drive.damping);
-      body.disablePreStep = true;
       this.nodes.push(node);
-      this.bodies.push(body);
-      this.shapes.push(shape);
+      this.bodies.push(null as unknown as PhysicsBody);
+      this.shapes.push(null as unknown as PhysicsShape);
       this.constraints.push(null);
-      this.attached.push(true);
+      this.attached.push(false);
       this.prevPos.push(node.position.clone());
       this.curPos.push(node.position.clone());
       this.prevQ.push(Quaternion.Identity());
       this.curQ.push(Quaternion.Identity());
+      this.createBody(i);
     }
-    // joints
-    for (let i = 1; i < RIG_COUNT; i++) {
-      const name = RIG_BODIES[i];
-      const bs = this.spec.bodies[i];
-      const parentIdx = RIG_INDEX[RIG_PARENT[name as Exclude<RigBody, "pelvis">]];
-      const frame = frameFor(name);
-      const limits: { axis: number; minLimit?: number; maxLimit?: number }[] = [
-        { axis: A.LINEAR_X, minLimit: 0, maxLimit: 0 },
-        { axis: A.LINEAR_Y, minLimit: 0, maxLimit: 0 },
-        { axis: A.LINEAR_Z, minLimit: 0, maxLimit: 0 },
-        ...angularLimits(frame, bs.limits),
-      ];
-      const c = new Physics6DoFConstraint(
-        {
-          pivotA: new Vector3(bs.pivotParent[0], bs.pivotParent[1], bs.pivotParent[2]),
-          pivotB: new Vector3(bs.pivotSelf[0], bs.pivotSelf[1], bs.pivotSelf[2]),
-          axisA: new Vector3(frame.main[0], frame.main[1], frame.main[2]),
-          axisB: new Vector3(frame.main[0], frame.main[1], frame.main[2]),
-          perpAxisA: new Vector3(frame.perp[0], frame.perp[1], frame.perp[2]),
-          perpAxisB: new Vector3(frame.perp[0], frame.perp[1], frame.perp[2]),
-          collision: false,
-        },
-        limits,
-        opts.scene,
-      );
-      this.bodies[parentIdx].addConstraint(this.bodies[i], c);
-      this.constraints[i] = c;
-    }
+    for (let i = 1; i < RIG_COUNT; i++) this.createJoint(i);
     this.tone.fill(1);
+  }
+
+  /** (Re)creates the physics body + shape for rig body i on its existing node. */
+  private createBody(i: number) {
+    const bs = this.spec.bodies[i];
+    const node = this.nodes[i];
+    const body = new PhysicsBody(node, PhysicsMotionType.DYNAMIC, false, this.scene);
+    const shape = this.makeShape(bs);
+    shape.filterMembershipMask = ragGroup(this.slot);
+    shape.filterCollideMask = ragCollideMask(this.slot);
+    shape.material = { friction: bs.name.startsWith("foot") ? 0.9 : 0.6, restitution: 0.02 };
+    body.shape = shape;
+    body.setMassProperties({
+      mass: bs.mass,
+      centerOfMass: Vector3.Zero(),
+      inertia: new Vector3(bs.inertia[0], bs.inertia[1], bs.inertia[2]),
+      inertiaOrientation: Quaternion.Identity(),
+    });
+    body.setLinearDamping(0.05);
+    body.setAngularDamping(bs.drive.damping);
+    body.disablePreStep = true;
+    this.plugin.setEventMask(body, (this.plugin as unknown as { _hknp: { EventType: { COLLISION_STARTED: { value: number } } } })._hknp.EventType.COLLISION_STARTED.value);
+    this.bodies[i] = body;
+    this.shapes[i] = shape;
+    this.attached[i] = true;
+    this.lastDamping[i] = -1;
+    this.onBodyCreated?.(i, body);
+  }
+
+  private createJoint(i: number) {
+    const name = RIG_BODIES[i];
+    const bs = this.spec.bodies[i];
+    const parentIdx = RIG_INDEX[RIG_PARENT[name as Exclude<RigBody, "pelvis">]];
+    const frame = frameFor(name);
+    const limits: { axis: number; minLimit?: number; maxLimit?: number }[] = [
+      { axis: A.LINEAR_X, minLimit: 0, maxLimit: 0 },
+      { axis: A.LINEAR_Y, minLimit: 0, maxLimit: 0 },
+      { axis: A.LINEAR_Z, minLimit: 0, maxLimit: 0 },
+      ...angularLimits(frame, bs.limits),
+    ];
+    const c = new Physics6DoFConstraint(
+      {
+        pivotA: new Vector3(bs.pivotParent[0], bs.pivotParent[1], bs.pivotParent[2]),
+        pivotB: new Vector3(bs.pivotSelf[0], bs.pivotSelf[1], bs.pivotSelf[2]),
+        axisA: new Vector3(frame.main[0], frame.main[1], frame.main[2]),
+        axisB: new Vector3(frame.main[0], frame.main[1], frame.main[2]),
+        perpAxisA: new Vector3(frame.perp[0], frame.perp[1], frame.perp[2]),
+        perpAxisB: new Vector3(frame.perp[0], frame.perp[1], frame.perp[2]),
+        collision: false,
+      },
+      limits,
+      this.scene,
+    );
+    this.bodies[parentIdx].addConstraint(this.bodies[i], c);
+    this.constraints[i] = c;
+  }
+
+  /** Called whenever a body is (re)created so the owner can register it for lookups. */
+  onBodyCreated: ((i: number, body: PhysicsBody) => void) | null = null;
+
+  /** Rebuild every severed branch at the given FK pose (round reset). Nodes keep their identity. */
+  restoreAll(fk: FkResult) {
+    const missing: number[] = [];
+    for (let i = 0; i < RIG_COUNT; i++) if (!this.attached[i]) missing.push(i);
+    for (const i of missing) {
+      this.nodes[i].position.copyFrom(fk.p[i]);
+      this.nodes[i].rotationQuaternion!.copyFrom(fk.q[i]);
+      this.createBody(i);
+    }
+    for (const i of missing) {
+      this.createJoint(i);
+      this.teleportBody(i, fk.p[i], fk.q[i]);
+    }
   }
 
   private fkRest() {
@@ -244,12 +284,40 @@ export class Rig {
       if (inheritLinear) b.setLinearVelocity(inheritLinear);
     }
     this.rootKinematic = kinematic;
+    this.rootInit = false;
   }
   get isRootKinematic(): boolean {
     return this.rootKinematic;
   }
+  private rootFromP = new Vector3();
+  private rootFromQ = Quaternion.Identity();
+  private rootToP = new Vector3();
+  private rootToQ = Quaternion.Identity();
+  private rootInit = false;
+  /** Set the pelvis target for this tick; applied progressively across physics substeps by applyRootSub. */
   setRootTarget(p: Vector3, q: Quaternion) {
-    this.pelvis.setTargetTransform(p, q);
+    if (!this.rootInit) {
+      this.rootFromP.copyFrom(this.nodes[0].position);
+      this.rootFromQ.copyFrom(this.nodes[0].rotationQuaternion!);
+      this.rootInit = true;
+    } else {
+      this.rootFromP.copyFrom(this.rootToP);
+      this.rootFromQ.copyFrom(this.rootToQ);
+    }
+    this.rootToP.copyFrom(p);
+    this.rootToQ.copyFrom(q);
+  }
+  /** Substep k of n (1-based): drive the kinematic pelvis part of the way to this tick's target. */
+  applyRootSub(k: number, n: number) {
+    if (!this.rootKinematic || !this.rootInit) return;
+    const t = k / n;
+    _tmpA.copyFrom(this.rootFromP).scaleInPlace(1 - t).addInPlace(_tmpB.copyFrom(this.rootToP).scaleInPlace(t));
+    Quaternion.SlerpToRef(this.rootFromQ, this.rootToQ, t, _qa);
+    this.pelvis.setTargetTransform(_tmpA, _qa);
+  }
+  /** Forget interpolation history (after teleports / mode switches). */
+  resetRootHistory() {
+    this.rootInit = false;
   }
 
   /** Computes world-space targets for the current pose. */
@@ -340,31 +408,47 @@ export class Rig {
   }
 
   /**
-   * Sever the joint above `root` (and with it every descendant). Returns the indices removed from this rig.
-   * Physical constraint + the joint on the parent side are disposed here; the caller (sim) must hand the
-   * bodies to a LimbObject BEFORE calling this so nothing is lost. Must be called outside the physics step.
+   * Sever the joint above `root` (and with it every descendant). Captures each removed body's state, then
+   * disposes constraints, bodies and shapes (the TransformNodes are kept so the rig can be restored).
+   * Must be called outside the physics step.
    */
-  severJoint(root: RigBody): number[] {
+  severJoint(root: RigBody): SeveredBody[] {
     const removed: number[] = [];
     const ri = RIG_INDEX[root];
-    if (!this.attached[ri]) return removed;
+    if (!this.attached[ri]) return [];
     const stack = [ri];
     while (stack.length) {
       const i = stack.pop()!;
-      if (!this.attached[i]) continue;
+      if (!this.attached[i] || removed.includes(i)) continue;
       removed.push(i);
       for (let c = 1; c < RIG_COUNT; c++) {
         if (this.attached[c] && RIG_INDEX[RIG_PARENT[RIG_BODIES[c] as Exclude<RigBody, "pelvis">]] === i) stack.push(c);
       }
     }
+    const out: SeveredBody[] = [];
+    for (const i of removed) {
+      out.push({
+        index: i,
+        pos: this.nodes[i].position.clone(),
+        q: this.nodes[i].rotationQuaternion!.clone(),
+        lin: this.bodies[i].getLinearVelocity().clone(),
+        ang: this.bodies[i].getAngularVelocity().clone(),
+      });
+    }
     for (const i of removed) {
       this.constraints[i]?.dispose();
       this.constraints[i] = null;
+    }
+    for (const i of removed) {
+      this.onBodyRemoved?.(i, this.bodies[i]);
+      this.bodies[i].dispose();
+      this.shapes[i].dispose();
       this.attached[i] = false;
       this.tone[i] = 0;
     }
-    return removed;
+    return out;
   }
+  onBodyRemoved: ((i: number, body: PhysicsBody) => void) | null = null;
 
   dispose() {
     for (let i = 0; i < RIG_COUNT; i++) {
@@ -373,10 +457,11 @@ export class Rig {
     }
     for (let i = 0; i < RIG_COUNT; i++) {
       if (this.attached[i]) {
+        this.onBodyRemoved?.(i, this.bodies[i]);
         this.bodies[i].dispose();
         this.shapes[i].dispose();
-        this.nodes[i].dispose();
       }
+      this.nodes[i].dispose();
     }
   }
 }

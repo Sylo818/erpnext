@@ -214,7 +214,6 @@ export class InjuryState {
     // vitality
     out.vitalityLoss = J * 0.2 * tun.vitality * (h.vitMult ?? 1);
     this.vitality = Math.max(0, this.vitality - out.vitalityLoss);
-    this.balance = Math.max(0, this.balance - J * 0.5);
 
     const after = this.level(h.region);
     if (after > before) {
