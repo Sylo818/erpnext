@@ -1,0 +1,43 @@
+{
+  "name": "bad-break",
+  "version": "0.1.0",
+  "private": true,
+  "description": "BAD BREAK - a browser-based 3D physics fighting game. Two idiots. One room. Absolutely no insurance.",
+  "type": "module",
+  "engines": {
+    "node": ">=22.12.0"
+  },
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.server.json",
+    "assets": "tsx tools/build-assets.ts",
+    "server": "tsx src/server/index.ts",
+    "server:build": "tsc -p tsconfig.server.json",
+    "server:start": "node dist-server/server/index.js",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "smoke": "tsx tests/smoke/headless-physics.ts",
+    "smoke:net": "tsx tests/smoke/net-two-clients.ts",
+    "e2e": "playwright test",
+    "verify": "npm run typecheck && npm run test && npm run smoke && npm run smoke:net && npm run build"
+  },
+  "dependencies": {
+    "@babylonjs/core": "9.30.0",
+    "@babylonjs/havok": "1.3.14",
+    "@babylonjs/loaders": "9.30.0",
+    "ws": "8.22.0"
+  },
+  "devDependencies": {
+    "@babylonjs/inspector": "9.30.0",
+    "@babylonjs/serializers": "9.30.0",
+    "@playwright/test": "1.56.1",
+    "@types/node": "22.20.5",
+    "@types/ws": "8.18.2",
+    "tsx": "4.23.15",
+    "typescript": "5.9.3",
+    "vite": "7.3.7",
+    "vitest": "4.1.12"
+  }
+}
